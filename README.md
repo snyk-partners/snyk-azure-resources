@@ -1,7 +1,7 @@
-# Microsoft Azure & Snyk Workshop
+# Securing Microsoft Azure Kubernetes Service (AKS) with Snyk
 
 Welcome! This workshop will provide you with sample patterns and reference 
-architectures for securing Microsoft Azure workloads with Snyk. We will provide
+architectures for securing Microsoft Azure workloads running on Microsoft AKS with Snyk. We will provide
 you with step-by-step examples and sample code that will walk you through 
 deployment of supporting infrastructure, sample applications, and configuration 
 of the various Snyk integrations to Microsoft Azure.
@@ -326,4 +326,141 @@ NAME                            READY   STATUS    RESTARTS   AGE
 snyk-monitor-544ff7ccd9-qkwj8   1/1     Running   0          4m47s
 ```
 
-#### Adding Kubernetes workloads
+Note that Snyk Monitor will require outbound internet access. 
+
+#### Add Kubernetes workloads
+
+Now that our controller has been installed on our AKS cluster, we can add workloads for security scanning. Visit the
+[Snyk Knowledge Center](https://support.snyk.io/hc/en-us/articles/360003947117-Adding-Kubernetes-workloads-for-security-scanning) for
+additional information on this topic. For the purpose of this section, we will
+manually add some workloads. To do so, go to the Snyk web console and navigate to 
+`Integrations`.
+
+![snyk_integrations_02](images/snyk_integrations_02.png)
+
+Either type `Kubernetes` in the search bar, or scroll down.
+
+![snyk_integrations_03](images/snyk_integrations_03.png)
+
+You can monitor multiple clusters across multiple environments. If your controller is 
+communicating with the Snyk APIs, you will see it appear in the Snyk console. Select the
+appropriate cluster you wish to monitor, the relevant namespace, and the specific workloads. Finally 
+click the `Add selected workloads` button in the top right corner when you've made all
+of your selections as illustrated below:
+
+![snyk_integrations_04](images/snyk_integrations_04.png)
+
+After adding the workloads you will be redirected to the `Projects` page in the Snyk console
+where you will be able to view the results and take action. You can also view the `Import log` for a detailed status of 
+the progress.
+                                                            
+![snyk_integrations_05](images/snyk_integrations_05.png)
+
+### Interpret scan results
+
+The `Projects` page will contain an inventory of all projects added and a high level
+summary of findings. You can expand on a particular project to learn more about vulnerabilities that 
+may have been found and guidance on how to fix these or optimizations. Let's walk through some examples.
+
+The figure below shows the two workloads we imported in the previous section. These have been expanded to 
+show that the results are including two key areas: Kubernetes configuration and container image scan results.
+Clicking on each of these will present you with additional insights.
+
+![snyk_scan_01](images/snyk_scan_01.png)
+
+Let's begin with examining our Kubernetes configuration by click on each respective workload.
+
+![snyk_scan_02](images/snyk_scan_02.png)
+
+![snyk_scan_03](images/snyk_scan_03.png)
+
+The results above yield some interesting findings. From this view, we are able to see a summary of `Vulnerabilities`, 
+number of `Dependencies`, and our `Security configuration`. Let's take a closer look and 
+interpret what these results mean.
+
+If we examine the `azure-vote.yaml` manifest we applied to our Kubernetes cluster, we can see that we defined some
+parameters such as `cpu` and `memory` limits. As a result, these were not flagged during the scan. 
+
+```yaml
+          resources:
+            requests:
+              cpu: 100m
+              memory: 128Mi
+            limits:
+              cpu: 250m
+              memory: 256Mi
+```
+
+However, our manifest did not set `securityContext` parameters such as `readOnlyRootFilesystem`, `runAsNonRoot`,
+`allowPrivilegeEscalation`, and `capabilities`. As a result, we see this in our findings with the 
+`FAIL` flag. 
+
+- Run as non-root: Whether any containers in the workload have `container.securityContext.runAsNonRoot` set to `false` or unset.
+- Read-only root file system: Whether any containers in the workload have `container.securityContext.readOnlyFilesystem` set to `false` or unset.
+- Drop capabilities: Whether all capabilities are dropped and `CAP_SYS_ADMIN` is not added.
+
+Next, let's take a closer look at our container image results:
+
+![snyk_scan_04](images/snyk_scan_04.png)
+
+Here we are immediately advised that a `Dockerfile` is missing. We know this to be true, because our deployment consisted 
+of a manifest file that is pulling an image from a public registry. In the case of our `vote-back` and 
+`vote-front` applications we are pulling the [image](https://kubernetes.io/docs/concepts/containers/images/) from
+`redis` and `microsoft/azure-vote-front:v1` respectively. 
+
+A best practice here would be to include a `Dockerfile` in our Git repo and pull the image from our private
+registry. That way we can resolve any issues with our base images and also scan & monitor those through Snyk's integrations to
+[Azure Repos](https://support.snyk.io/hc/en-us/articles/360004002198-Azure-Repos-integration) and 
+[Azure Container Registry (ACR)](https://support.snyk.io/hc/en-us/articles/360003946957-Container-security-with-ACR-integrate-and-test).
+
+We will dive into these in a later workshop.
+
+### Fix issues
+
+As we now know, Kubernetes is not secure by default. It is beyond the scope of these 
+exercises to provide a deep-dive on this topic, but detailed documentation on [securing a cluster](https://kubernetes.io/docs/tasks/administer-cluster/securing-a-cluster/)
+is readily available. Additional reading is recommended on configuring a [security context](https://kubernetes.io/docs/tasks/configure-pod-container/security-context/) for a pod, 
+[pod security](https://kubernetes.io/docs/concepts/policy/pod-security-policy/) policies, and setting [capabilities](https://kubernetes.io/docs/tasks/configure-pod-container/security-context/#set-capabilities-for-a-container) for a container.
+
+However, for the time being, we will introduce a couple of quick changes to improve our security posture. We will accomplish this by adding a few
+lines to our Kubernetes manifest.
+
+```yaml
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            runAsNonRoot: true
+            capabilities:
+              drop:
+                - all
+```
+
+For your convenience, a sample file has already been created for you containing these changes. It is named
+`azure-vote-secure.yaml` and can be found in the `templates/` directory of the repository for this workshop.
+
+We will then need to apply this new file to our cluster with the following command:
+
+```bash
+kubectl apply -f templates/azure-vote-secure.yaml
+```
+
+We should see an output similar to the following:
+
+```text
+deployment.apps/azure-vote-back configured
+service/azure-vote-back unchanged
+deployment.apps/azure-vote-front configured
+service/azure-vote-front unchanged
+```
+
+Notice that the `deployment` for both the `vote-back` and `vote-front` applications show
+`configured` whereas the `service` for each shows as `unchanged`. This is expected since we have 
+defined `securityContext` for these.
+
+We will verify that our changes resolved the issue by checking our project once more. Since we have `snyk-monitor`
+running in our cluster we are actively monitoring our workloads.
+
+![snyk_scan_05](images/snyk_scan_05.png)
+
+Success! We've been able to identify security issues in our Kubernetes configuration, updating our manifest
+to include a fix, and applied these to resolve the problem.
