@@ -1,4 +1,4 @@
 [submodule "app/redis"]
 	path = app/redis
-	url = git@github.com:docker-library/redis.git
+	url = https://github.com/docker-library/redis.git
 	branch = master
