@@ -1,4 +1,4 @@
-[submodule "app/redis"]
-	path = app/redis
-	url = git@github.com:docker-library/redis.git
+[submodule "submodules/azure-voting-app-redis"]
+	path = submodules/azure-voting-app-redis
+	url = https://github.com/Azure-Samples/azure-voting-app-redis.git
 	branch = master
